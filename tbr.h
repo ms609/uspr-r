@@ -2861,9 +2861,6 @@ void leaf_reduction(utree *T1, utree *T2, map<string, int> *label_map = NULL, ma
 //		Rcout << "T1: " << T1->str(T1_new_root->get_label(), ";") << endl;
 		string T1_string = T1->str(T1_new_root->get_label(), ";");
 		utree T1_new = utree(T1_string, label_map, reverse_label_map);
-		// clear node lists so they aren't erased after swapping
-		T1->get_leaves().clear();
-		T1->get_internal_nodes().clear();
 		swap(*T1, T1_new);
 	//	Rcout << "T1_new: " << T1->str() << endl;
 
@@ -2873,10 +2870,7 @@ void leaf_reduction(utree *T1, utree *T2, map<string, int> *label_map = NULL, ma
 		T2->normalize_order(T2_new_root->get_label());
 //		Rcout << "T2: " << T2->str(T2_new_root->get_label(), ";") << endl;
 		string T2_string = T2->str(T2_new_root->get_label(), ";");
-		// clear node lists so they aren't erased after swapping
 		utree T2_new = utree(T2_string, label_map, reverse_label_map);
-		T2->get_leaves().clear();
-		T2->get_internal_nodes().clear();
 		swap(*T2, T2_new);
 //		Rcout << "T2_new: " << T2->str() << endl;
 
