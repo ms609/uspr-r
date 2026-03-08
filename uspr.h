@@ -45,6 +45,7 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #include "uforest.h"
 #include "tbr.h"
 #include "uspr_neighbors.h"
+#include "../spr/utree_splits.h"
 
 //#define DEBUG_USPR 1
 #ifdef DEBUG_USPR
@@ -144,6 +145,13 @@ int uspr_distance(uforest &T1_original, uforest &T2_original) {
 		Rcout << "T2R: " << T2 << endl;
 	)
 
+	// exact lookup for small reduced trees (4-9 leaves)
+	{
+		int lookup_result = spr_lookup::lookup_utrees(T1, T2);
+		if (lookup_result >= 0) {
+			return lookup_result;
+		}
+	}
 
 	// set of visited trees
 	set<string> visited_trees = set<string>();
@@ -197,6 +205,24 @@ int uspr_distance(uforest &T1_original, uforest &T2_original) {
 
 		// check if the distance estimate is final
 		if (prev_estimator != final_estimator) {
+			// Try exact lookup on reduced pair at first pop only (BFS).
+			// Hits ~50% of the time for 10-12 leaf trees, giving ~8% speedup
+			// on those cases by skipping TBR/replug cascade.
+			if (prev_estimator == BFS) {
+				uforest T_copy(T);
+				uforest T2_copy(T2);
+				map<string, int> lm;
+				map<int, string> rlm;
+				leaf_reduction(&T_copy, &T2_copy, &lm, &rlm);
+				T_copy.normalize_order();
+				T2_copy.normalize_order();
+				int exact = spr_lookup::lookup_utrees(T_copy, T2_copy);
+				if (exact >= 0) {
+					distance_priority_queue.insert(
+						tree_distance(cost, exact, tree, final_estimator));
+					continue;
+				}
+			}
 			// if not, compute the next estimate and insert it into the queue
 			int distance = 1;
 			if (prev_estimator > TBR_APPROX &&
