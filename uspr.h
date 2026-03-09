@@ -36,6 +36,7 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #include <vector>
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <list>
 #include <memory>
 #include <ctime>
@@ -45,6 +46,8 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #include "uforest.h"
 #include "tbr.h"
 #include "uspr_neighbors.h"
+#include "tree_numbering.h"
+#include "uspr_neighbors_numbered.h"
 #include "../spr/utree_splits.h"
 
 //#define DEBUG_USPR 1
@@ -64,18 +67,13 @@ bool USE_REPLUG_ESTIMATE = true;
 typedef enum {REPLUG, TBR, TBR_APPROX, BFS} estimator_t;
 string estimator_t_name[] = {"REPLUG", "TBR", "TBR_APPROX", "BFS"};
 
-// distance estimate
+// distance estimate (string-based, for fallback)
 class tree_distance {
 	public:
-	// cost to reach this tree
 	int cost;
-	// estimate of distance to destination
 	int estimate;
-	// cost + estimate
 	int distance;
-	// the tree
 	string tree;
-	// estimator used
 	estimator_t estimator;
 
 	tree_distance(int c, int d, string t, estimator_t e) {
@@ -91,7 +89,6 @@ class tree_distance {
 
 };
 
-// prefer better estimates when equal
 bool operator < (tree_distance a, tree_distance b) {
 	if (a.distance == b.distance) {
 		if (a.estimate == b.estimate) {
@@ -114,11 +111,58 @@ bool operator <= (tree_distance a, tree_distance b) {
 	return a.distance <= b.distance;
 }
 
+// distance estimate (tree-number-based, for n <= 51)
+class tree_distance_num {
+	public:
+	int cost;
+	int estimate;
+	int distance;
+	tree_num_t tree_number;
+	estimator_t estimator;
+
+	tree_distance_num(int c, int d, tree_num_t t, estimator_t e) {
+		cost = c;
+		estimate = d;
+		distance = c + d;
+		tree_number = t;
+		estimator = e;
+	}
+
+	friend bool operator < (tree_distance_num a, tree_distance_num b);
+	friend bool operator <= (tree_distance_num a, tree_distance_num b);
+};
+
+bool operator < (tree_distance_num a, tree_distance_num b) {
+	if (a.distance == b.distance) {
+		if (a.estimate == b.estimate) {
+			return a.estimator < b.estimator;
+		}
+		else {
+			return a.estimate < b.estimate;
+		}
+	}
+	return a.distance < b.distance; }
+bool operator <= (tree_distance_num a, tree_distance_num b) {
+	if (a.distance == b.distance) {
+		if (a.estimate == b.estimate) {
+			return a.estimator <= b.estimator;
+		}
+		else {
+			return a.estimate <= b.estimate;
+		}
+	}
+	return a.distance <= b.distance;
+}
+
 
 // function prototypes
 int uspr_distance(uforest &T1, uforest &T2);
+int uspr_distance_string_based(uforest &T1, uforest &T2);
+int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip);
 
 // functions
+
+// Main entry point: dispatches to numbered or string-based A* search.
 int uspr_distance(uforest &T1_original, uforest &T2_original) {
 
 	uforest T1 = uforest(T1_original);
@@ -153,22 +197,36 @@ int uspr_distance(uforest &T1_original, uforest &T2_original) {
 		}
 	}
 
-	// set of visited trees
-	set<string> visited_trees = set<string>();
+	int n_tip = spr_lookup::count_leaves(T1);
 
-	// target string
-	string target = utree(T2).str();
+	// Use tree-number A* for n <= 51, fall back to strings for larger trees
+	if (n_tip <= TreeTools::TREE_NUM_MAX_TIP) {
+		return uspr_distance_numbered(T1, T2, n_tip);
+	} else {
+		return uspr_distance_string_based(T1, T2);
+	}
+}
 
+// Tree-number-based A* search (n <= 51 leaves after reduction).
+// Uses uint256 tree numbers instead of Newick strings for:
+// - O(1) equality comparison and hashing
+// - zero heap allocation for tree identity
+// - no redundant serialization in neighbor generation
+int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 
-	// priority queue of trees
-	multiset<tree_distance> distance_priority_queue = multiset<tree_distance>();
+	// visited set: O(1) amortized lookup via hash
+	unordered_set<tree_num_t, tree_num_hash> visited_trees;
 
+	// target tree number
+	tree_num_t target_number = utree_to_tree_number(T2);
 
-	// start with the first distance
-	visited_trees.insert(T1.str());
-	distance_priority_queue.insert(tree_distance(0, 1, utree(T1).str(), BFS));
+	// priority queue
+	multiset<tree_distance_num> distance_priority_queue;
 
-
+	// start with T1
+	tree_num_t start_number = utree_to_tree_number(T1);
+	visited_trees.insert(start_number);
+	distance_priority_queue.insert(tree_distance_num(0, 1, start_number, BFS));
 
 	// final estimator
 	estimator_t final_estimator = BFS;
@@ -182,48 +240,150 @@ int uspr_distance(uforest &T1_original, uforest &T2_original) {
 		final_estimator = REPLUG;
 	}
 
-	// explore the next tree
+	while (!distance_priority_queue.empty()) {
+		auto it = distance_priority_queue.begin();
+
+		int cost = it->cost;
+		tree_num_t tn = it->tree_number;
+		estimator_t prev_estimator = it->estimator;
+		distance_priority_queue.erase(it);
+
+		// decode tree number → uforest directly (no Newick roundtrip)
+		uforest T(tree_number_to_utree(tn, n_tip));
+		distances_from_leaf_decorator(T, T.get_smallest_leaf());
+		T.normalize_order();
+
+		if (prev_estimator != final_estimator) {
+			// Phase 3: try exact lookup on reduced pair at first pop (BFS)
+			if (prev_estimator == BFS) {
+				uforest T_copy(T);
+				uforest T2_copy(T2);
+
+				list<int> red_leaves = T_copy.find_leaves();
+				nodemapping twins(red_leaves);
+				map<int, int> sibling_pairs = T_copy.find_sibling_pairs();
+				T_copy.root(T_copy.get_smallest_leaf());
+				T2_copy.root(T2_copy.get_smallest_leaf());
+				distances_from_leaf_decorator(T_copy, T_copy.get_smallest_leaf());
+				distances_from_leaf_decorator(T2_copy, T2_copy.get_smallest_leaf());
+				for (unode* u : T_copy.get_leaves())
+					if (u != nullptr) u->set_terminal(true);
+				for (unode* u : T2_copy.get_leaves())
+					if (u != nullptr) u->set_terminal(true);
+
+				leaf_reduction_hlpr(T_copy, T2_copy, twins, sibling_pairs);
+
+				unode* anchor1 = T_copy.get_node(
+					T_copy.get_smallest_leaf())->find_uncontracted_node();
+				unode* root1 = nullptr;
+				if (!anchor1->get_terminal()) {
+					for (unode* nbr : anchor1->get_neighbors()) {
+						if (nbr->get_terminal()) { root1 = nbr; break; }
+					}
+				}
+				if (root1 != nullptr) {
+					vector<int> t1_labels;
+					t1_labels.push_back(root1->get_label());
+					spr_lookup::collect_terminal_labels(anchor1, root1, t1_labels);
+
+					int n_red = static_cast<int>(t1_labels.size());
+					if (n_red >= 4 && n_red <= 9) {
+						map<int, int> remap1, remap2;
+						bool remap_ok = true;
+						for (int ri = 0; ri < n_red; ri++) {
+							remap1[t1_labels[ri]] = ri;
+							int t2_lab = twins.get_forward(t1_labels[ri]);
+							if (t2_lab == -1) { remap_ok = false; break; }
+							remap2[t2_lab] = ri;
+						}
+						if (remap_ok) {
+							int root2_lab = twins.get_forward(root1->get_label());
+							unode* root2 = T2_copy.get_node(root2_lab);
+							int exact = spr_lookup::lookup_reduced_utrees(
+								T_copy, T2_copy, root1, root2,
+								remap1, remap2, n_red);
+							if (exact >= 0) {
+								distance_priority_queue.insert(
+									tree_distance_num(cost, exact, tn, final_estimator));
+								continue;
+							}
+						}
+					}
+				}
+			}
+			// Compute the next estimate, re-queue with SAME tree number
+			int distance = 1;
+			if (prev_estimator > TBR_APPROX &&
+					USE_TBR_APPROX_ESTIMATE) {
+				distance = tbr_high_lower_bound(T, T2);
+				distance_priority_queue.insert(tree_distance_num(cost, distance, tn, TBR_APPROX));
+			}
+			else if (prev_estimator > TBR &&
+					USE_TBR_ESTIMATE) {
+				distance = tbr_distance(T, T2);
+				distance_priority_queue.insert(tree_distance_num(cost, distance, tn, TBR));
+			}
+			else if (prev_estimator > REPLUG &&
+					USE_REPLUG_ESTIMATE) {
+				distance = replug_distance(T, T2);
+				distance_priority_queue.insert(tree_distance_num(cost, distance, tn, REPLUG));
+			}
+			continue;
+		}
+
+		// Final estimator: expand neighbors
+		list<tree_num_t> neighbors = get_neighbors_numbered(&T, &visited_trees);
+		debug_uspr(
+			Rcout << "examining " << neighbors.size() << " neighbors" << endl;
+		)
+		for (const tree_num_t& nbr_num : neighbors) {
+			if (nbr_num == target_number) {
+				debug_uspr(
+					Rcout << "examined " << visited_trees.size() << " trees" << endl;
+				)
+				return cost + 1;
+			}
+			distance_priority_queue.insert(tree_distance_num(cost + 1, 1, nbr_num, BFS));
+		}
+	}
+
+	return -1;
+}
+
+// String-based A* search (fallback for n > 51).
+int uspr_distance_string_based(uforest &T1, uforest &T2) {
+
+	set<string> visited_trees = set<string>();
+	string target = utree(T2).str();
+	multiset<tree_distance> distance_priority_queue = multiset<tree_distance>();
+
+	visited_trees.insert(T1.str());
+	distance_priority_queue.insert(tree_distance(0, 1, utree(T1).str(), BFS));
+
+	estimator_t final_estimator = BFS;
+	if (USE_TBR_APPROX_ESTIMATE) {
+		final_estimator = TBR_APPROX;
+	}
+	if (USE_TBR_ESTIMATE) {
+		final_estimator = TBR;
+	}
+	if (USE_REPLUG_ESTIMATE) {
+		final_estimator = REPLUG;
+	}
+
 	while (!distance_priority_queue.empty()) {
 		multiset<tree_distance>::iterator it = distance_priority_queue.begin();
 
-		// debugging
-		debug_uspr(
-			Rcout << it->distance << ": " << it->cost << " + " << it->estimate << " using " << estimator_t_name[it->estimator] << endl;
-			Rcout << "\t" << it->tree << endl;
-		)
-
-		// remove the old entry
 		int cost = it->cost;
 		string tree = it->tree;
 		estimator_t prev_estimator = it->estimator;
 		distance_priority_queue.erase(it);
 
-		// build the tree
 		uforest T = uforest(tree);
 		distances_from_leaf_decorator(T, T.get_smallest_leaf());
 		T.normalize_order();
 
-		// check if the distance estimate is final
 		if (prev_estimator != final_estimator) {
-			// Try exact lookup on reduced pair at first pop only (BFS).
-			// Hits ~50% of the time for 10-12 leaf trees, giving ~8% speedup
-			// on those cases by skipping TBR/replug cascade.
-			if (prev_estimator == BFS) {
-				uforest T_copy(T);
-				uforest T2_copy(T2);
-				map<string, int> lm;
-				map<int, string> rlm;
-				leaf_reduction(&T_copy, &T2_copy, &lm, &rlm);
-				T_copy.normalize_order();
-				T2_copy.normalize_order();
-				int exact = spr_lookup::lookup_utrees(T_copy, T2_copy);
-				if (exact >= 0) {
-					distance_priority_queue.insert(
-						tree_distance(cost, exact, tree, final_estimator));
-					continue;
-				}
-			}
-			// if not, compute the next estimate and insert it into the queue
 			int distance = 1;
 			if (prev_estimator > TBR_APPROX &&
 					USE_TBR_APPROX_ESTIMATE) {
@@ -243,37 +403,14 @@ int uspr_distance(uforest &T1_original, uforest &T2_original) {
 			continue;
 		}
 
-		// if final, get the tree neighborhood
-		// TODO: enumerate SPRs
-		// note: valid SPRs - move one endpoint to anywhere within its subtree
-		// i.e. enumerate edges, then enumerate over each subtree
-		// what about duplicates? similar to RSPR, NNIs?
-		// for each tree
-			// check if it has already been seen (visited_trees)
-			// if not then insert it into the queue (initial BFS - cost + 1)
-			// TODO: stop immediately if we find T2?
-
 		list<utree> neighbors = get_neighbors(&T, &visited_trees);
-		debug_uspr(
-			Rcout << "examining " << neighbors.size() << " neighbors" << endl;
-		)
 		for (utree tree : neighbors) {
 			string tree_string = tree.str();
-//			Rcout << "neighbor: " << tree_string << endl;
-//			Rcout << "target: " << target << endl;
-				if (tree_string == target) {
-//					Rcout << "returning " << cost+1 << endl;
-					debug_uspr(
-					  Rcout << "examined " << visited_trees.size() << " trees" << endl;
-					)
-					return cost+1;
-				}
-//				else {
-//					Rcout << "cond: " << (tree_string == target) << endl;
-//				}
-				distance_priority_queue.insert(tree_distance(cost+1, 1, tree_string, BFS));
+			if (tree_string == target) {
+				return cost + 1;
+			}
+			distance_priority_queue.insert(tree_distance(cost + 1, 1, tree_string, BFS));
 		}
-
 	}
 
 	return -1;

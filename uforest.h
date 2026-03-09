@@ -51,6 +51,14 @@ class uforest: public utree {
 				leaves[smallest_leaf]->set_component(0);
 			}
 		}
+		// Construct from an existing utree (move, no deep copy or Newick roundtrip)
+		uforest(utree&& t) : utree(std::move(t)) {
+			components = vector<unode *>();
+			if (leaves.size() > 0) {
+				components.push_back(leaves[smallest_leaf]);
+				leaves[smallest_leaf]->set_component(0);
+			}
+		}
 		uforest(const uforest &F) : utree(F) {
 			// copy vector of pointers
 			int components_size = F.components.size();

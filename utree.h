@@ -54,6 +54,8 @@ class utree {
 		vector <unode*> leaves;
 		int smallest_leaf;
 	public:
+		// default constructor: empty tree (for building programmatically)
+		utree() : smallest_leaf(0) {}
 		// create the tree
 		utree(string &newick, map<string, int> *label_map = NULL, map<int, string> *reverse_label_map = NULL) {
 			internal_nodes = vector<unode *>();
@@ -118,6 +120,11 @@ class utree {
 				}
 			}
 		}
+		// move constructor: transfers ownership with no deep copy
+		utree(utree&& T) noexcept
+			: internal_nodes(std::move(T.internal_nodes)),
+			  leaves(std::move(T.leaves)),
+			  smallest_leaf(T.smallest_leaf) {}
 		utree& operator=(utree T) {
 			swap(*this, T);
 			return *this;
