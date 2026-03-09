@@ -113,8 +113,8 @@ void add_neighbor_numbered(utree *T, unode *x, unode *y,
 
 	// apply the spr
 	T->uspr(x, y, w, z, &yprime, &y1, &y2);
-	// normalize the tree
-	distances_from_leaf_decorator(*T, T->get_smallest_leaf());
+	// normalize for canonical tree number — distances not needed here
+	// (normalize_order and utree_to_tree_number don't use get_distance())
 	T->normalize_order();
 
 	// compute tree number instead of string
@@ -124,9 +124,8 @@ void add_neighbor_numbered(utree *T, unode *x, unode *y,
 		neighbors.push_back(num);
 	}
 
-	// revert the SPR
+	// revert the SPR and restore canonical order
 	T->uspr(x, yprime, y1, y2);
-	distances_from_leaf_decorator(*T, T->get_smallest_leaf());
 	T->normalize_order();
 }
 

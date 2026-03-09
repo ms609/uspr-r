@@ -35,6 +35,7 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 #include <map>
+#include <queue>
 #include <set>
 #include <unordered_set>
 #include <list>
@@ -128,30 +129,17 @@ class tree_distance_num {
 		estimator = e;
 	}
 
-	friend bool operator < (tree_distance_num a, tree_distance_num b);
-	friend bool operator <= (tree_distance_num a, tree_distance_num b);
+	friend bool operator < (const tree_distance_num& a, const tree_distance_num& b);
+	friend bool operator > (const tree_distance_num& a, const tree_distance_num& b);
 };
 
-bool operator < (tree_distance_num a, tree_distance_num b) {
-	if (a.distance == b.distance) {
-		if (a.estimate == b.estimate) {
-			return a.estimator < b.estimator;
-		}
-		else {
-			return a.estimate < b.estimate;
-		}
-	}
-	return a.distance < b.distance; }
-bool operator <= (tree_distance_num a, tree_distance_num b) {
-	if (a.distance == b.distance) {
-		if (a.estimate == b.estimate) {
-			return a.estimator <= b.estimator;
-		}
-		else {
-			return a.estimate <= b.estimate;
-		}
-	}
-	return a.distance <= b.distance;
+bool operator < (const tree_distance_num& a, const tree_distance_num& b) {
+	if (a.distance != b.distance) return a.distance < b.distance;
+	if (a.estimate != b.estimate) return a.estimate < b.estimate;
+	return a.estimator < b.estimator;
+}
+bool operator > (const tree_distance_num& a, const tree_distance_num& b) {
+	return b < a;
 }
 
 
@@ -220,13 +208,15 @@ int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 	// target tree number
 	tree_num_t target_number = utree_to_tree_number(T2);
 
-	// priority queue
-	multiset<tree_distance_num> distance_priority_queue;
+	// priority queue: binary min-heap (better cache behaviour than multiset)
+	priority_queue<tree_distance_num,
+	               vector<tree_distance_num>,
+	               greater<tree_distance_num>> distance_priority_queue;
 
 	// start with T1
 	tree_num_t start_number = utree_to_tree_number(T1);
 	visited_trees.insert(start_number);
-	distance_priority_queue.insert(tree_distance_num(0, 1, start_number, BFS));
+	distance_priority_queue.push(tree_distance_num(0, 1, start_number, BFS));
 
 	// final estimator
 	estimator_t final_estimator = BFS;
@@ -241,16 +231,20 @@ int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 	}
 
 	while (!distance_priority_queue.empty()) {
-		auto it = distance_priority_queue.begin();
+		const tree_distance_num top = distance_priority_queue.top();
+		distance_priority_queue.pop();
 
-		int cost = it->cost;
-		tree_num_t tn = it->tree_number;
-		estimator_t prev_estimator = it->estimator;
-		distance_priority_queue.erase(it);
+		int cost = top.cost;
+		tree_num_t tn = top.tree_number;
+		estimator_t prev_estimator = top.estimator;
 
 		// decode tree number → uforest directly (no Newick roundtrip)
+		// distances_from_leaf_decorator is NOT called here: normalize_order()
+		// and utree_to_tree_number() don't use get_distance(), and every
+		// estimator function (tbr_high_lower_bound, tbr_distance,
+		// replug_distance) makes its own copy and calls root() +
+		// distances_from_leaf_decorator internally.
 		uforest T(tree_number_to_utree(tn, n_tip));
-		distances_from_leaf_decorator(T, T.get_smallest_leaf());
 		T.normalize_order();
 
 		if (prev_estimator != final_estimator) {
@@ -303,7 +297,7 @@ int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 								T_copy, T2_copy, root1, root2,
 								remap1, remap2, n_red);
 							if (exact >= 0) {
-								distance_priority_queue.insert(
+								distance_priority_queue.push(
 									tree_distance_num(cost, exact, tn, final_estimator));
 								continue;
 							}
@@ -316,17 +310,17 @@ int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 			if (prev_estimator > TBR_APPROX &&
 					USE_TBR_APPROX_ESTIMATE) {
 				distance = tbr_high_lower_bound(T, T2);
-				distance_priority_queue.insert(tree_distance_num(cost, distance, tn, TBR_APPROX));
+				distance_priority_queue.push(tree_distance_num(cost, distance, tn, TBR_APPROX));
 			}
 			else if (prev_estimator > TBR &&
 					USE_TBR_ESTIMATE) {
 				distance = tbr_distance(T, T2);
-				distance_priority_queue.insert(tree_distance_num(cost, distance, tn, TBR));
+				distance_priority_queue.push(tree_distance_num(cost, distance, tn, TBR));
 			}
 			else if (prev_estimator > REPLUG &&
 					USE_REPLUG_ESTIMATE) {
 				distance = replug_distance(T, T2);
-				distance_priority_queue.insert(tree_distance_num(cost, distance, tn, REPLUG));
+				distance_priority_queue.push(tree_distance_num(cost, distance, tn, REPLUG));
 			}
 			continue;
 		}
@@ -343,7 +337,7 @@ int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 				)
 				return cost + 1;
 			}
-			distance_priority_queue.insert(tree_distance_num(cost + 1, 1, nbr_num, BFS));
+			distance_priority_queue.push(tree_distance_num(cost + 1, 1, nbr_num, BFS));
 		}
 	}
 
