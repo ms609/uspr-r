@@ -36,6 +36,8 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #endif
 
 #include <list>
+#include <vector>
+#include <algorithm>
 #include <sstream>
 #include <cstdio>
 #include <climits>
@@ -512,52 +514,56 @@ class unode {
 		if (label >= 0 && prev != NULL) {
 			return label;
 		}
-		map<int, unode *> ordered_children = map<int, unode *>();
-		int min_descendant = INT_MAX;
 		unode *parent = NULL;
+		int min_descendant = INT_MAX;
+
+		// Active neighbors: internal nodes in an unrooted binary tree have
+		// degree 3, so at most 3 children (2 when prev != NULL, 3 at root).
+		// Inline array + insertion sort avoids the per-call map heap allocation.
+		unode* ch[3];
+		int ch_min[3];
+		int nch = 0;
+
 		for (unode *n : neighbors) {
 			if (n != prev) {
-				int n_min_descendant = n->normalize_order_hlpr(this);
-				ordered_children.insert(make_pair(n_min_descendant, n));
-				if (n_min_descendant < min_descendant) {
-					min_descendant = n_min_descendant;
+				int m = n->normalize_order_hlpr(this);
+				// Insertion sort — at most 3 elements, so O(1) in practice
+				int i = nch++;
+				while (i > 0 && ch_min[i - 1] > m) {
+					ch[i]     = ch[i - 1];
+					ch_min[i] = ch_min[i - 1];
+					--i;
 				}
+				ch[i]     = n;
+				ch_min[i] = m;
+				if (m < min_descendant) min_descendant = m;
 			}
 			else {
 				parent = n;
 			}
 		}
-		// remove all neighbors
+
+		// re-add in sorted order
 		clear_neighbors();
+		if (parent != NULL) add_neighbor(parent);
+		for (int i = 0; i < nch; ++i) add_neighbor(ch[i]);
 
-		// re-add in correct order
-		if (parent != NULL) {
-			add_neighbor(parent);
-		}
-		while(!ordered_children.empty()) {
-			map<int, unode *>::iterator next = ordered_children.begin();
-			add_neighbor(next->second);
-			ordered_children.erase(next);
-		}
-
-		// contracted neighbors
-		ordered_children.clear();
-		for (unode *n : contracted_neighbors) {
-			int n_min_descendant = n->normalize_order_hlpr(this);
-			ordered_children.insert(make_pair(n_min_descendant, n));
-			if (n_min_descendant < min_descendant) {
-				min_descendant = n_min_descendant;
+		// Contracted neighbors: present only during leaf-reduction paths
+		// (not in the decoded trees of the main A* loop).
+		// Use vector<pair> — one allocation instead of N map-node allocations.
+		if (!contracted_neighbors.empty()) {
+			vector<pair<int, unode*>> ordered;
+			ordered.reserve(contracted_neighbors.size());
+			for (unode *n : contracted_neighbors) {
+				int m = n->normalize_order_hlpr(this);
+				ordered.push_back({m, n});
+				if (m < min_descendant) min_descendant = m;
 			}
+			sort(ordered.begin(), ordered.end());
+			clear_contracted_neighbors();
+			for (auto& p : ordered) add_contracted_neighbor(p.second);
 		}
-		// remove all neighbors
-		clear_contracted_neighbors();
 
-		// re-add in correct order
-		while(!ordered_children.empty()) {
-			map<int, unode *>::iterator next = ordered_children.begin();
-			add_contracted_neighbor(next->second);
-			ordered_children.erase(next);
-		}
 		return min_descendant;
 	}
 
