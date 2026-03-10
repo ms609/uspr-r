@@ -1861,7 +1861,7 @@ int replug_hlpr(uforest &F1, uforest &F2, nodemapping &twins, int k, pair<ufores
 	int temp_dead_component_extra_sockets = 0;
 
 	// test dead components
-	int i = 0;
+	debug_replug(int i = 0;)
 	debug_replug(
 		Rcout << "T1 dead components" << endl;
 	)
@@ -1884,7 +1884,7 @@ int replug_hlpr(uforest &F1, uforest &F2, nodemapping &twins, int k, pair<ufores
 			max_dead_component_extra_sockets = temp_dead_component_extra_sockets;
 		}
 
-		i = 0;
+		debug_replug(i = 0;)
 		debug_replug(Rcout << "T2 dead components" << endl;)
 		for(list<int> &l : T2_dead_components) {
 			int size = l.size();
