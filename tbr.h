@@ -34,6 +34,7 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <list>
 #include <memory>
 #include <ctime>
@@ -100,38 +101,28 @@ bool OPTIMIZE_BRANCH_AND_BOUND = true;
 
 class nodemapping {
 	private:
-		map <int,int> forward;
-		map <int,int> backward;
+		unordered_map<int,int> forward;
+		unordered_map<int,int> backward;
 	public:
-		nodemapping(list<int> &leaves) {
+		nodemapping(vector<int> &leaves) {
+			forward.reserve(leaves.size() * 2);
+			backward.reserve(leaves.size() * 2);
 			for(int l : leaves) {
-				forward.insert(make_pair(l,l));
-				backward.insert(make_pair(l,l));
+				forward.insert({l, l});
+				backward.insert({l, l});
 			}
 		}
 		void add(int l1, int l2) {
-			forward.erase(l1);
-			forward.insert(make_pair(l1, l2));
-			backward.erase(l2);
-			backward.insert(make_pair(l2, l1));
+			forward[l1] = l2;
+			backward[l2] = l1;
 		}
-		int get_forward(int l) {
-			map<int, int>::iterator result = forward.find(l);
-			if (result != forward.end()) {
-				return result->second;
-			}
-			else {
-				return -1;
-			}
+		int get_forward(int l) const {
+			auto result = forward.find(l);
+			return result != forward.end() ? result->second : -1;
 		}
-		int get_backward(int l) {
-			map<int, int>::iterator result = backward.find(l);
-			if (result != backward.end()) {
-				return result->second;
-			}
-			else {
-				return -1;
-			}
+		int get_backward(int l) const {
+			auto result = backward.find(l);
+			return result != backward.end() ? result->second : -1;
 		}
 };
 
@@ -230,20 +221,20 @@ int tbr_distance(uforest &T1, uforest &T2, T t, int (*func_pointer)(uforest &F1,
 template<typename T>
 int tbr_distance_hlpr(uforest &T1, uforest &T2, int k, T t, int (*func_pointer)(uforest &F1, uforest &F2, nodemapping &twins, int k, T s), uforest **MAF1 = NULL, uforest **MAF2 = NULL);
 template<typename T>
-int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int, int> &sibling_pairs, list<int> &singletons, T t, int (*func_pointer)(uforest &F1, uforest &F2, nodemapping &twins, int k, T s), uforest **MAF1 = NULL, uforest **MAF2 = NULL);
+int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int, int> &sibling_pairs, vector<int> &singletons, T t, int (*func_pointer)(uforest &F1, uforest &F2, nodemapping &twins, int k, T s), uforest **MAF1 = NULL, uforest **MAF2 = NULL);
 int replug_distance(uforest &T1, uforest &T2, bool quiet = true, uforest **MAF1_out = NULL, uforest **MAF2_out = NULL);
-list<pair<int,int> > find_pendants(unode *a, unode *c);
+vector<pair<int,int>> find_pendants(unode *a, unode *c);
 int tbr_approx(uforest &T1, uforest &T2);
 int tbr_approx(uforest &T1, uforest &T2, bool low);
-int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int, int> &sibling_pairs, list<int> &singletons);
+int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int, int> &sibling_pairs, vector<int> &singletons);
 int tbr_high_lower_bound(uforest &T1, uforest &T2);
 int tbr_low_lower_bound(uforest &T1, uforest &T2);
 int tbr_high_upper_bound(uforest &T1, uforest &T2);
 int tbr_low_upper_bound(uforest &T1, uforest &T2);
-int tbr_branch_bound(uforest &F1, uforest &F2, nodemapping &twins, map<int, int> &sibling_pairs, list<int> &singletons);
+int tbr_branch_bound(uforest &F1, uforest &F2, nodemapping &twins, map<int, int> &sibling_pairs, vector<int> &singletons);
 void find_sockets(uforest &T1, uforest &F1, list<socket *> &sockets);
 void find_sockets_hlpr(unode *n, unode *prev, uforest &T, list<socket *> &sockets);
-bool get_path(unode *xstart, unode *ystart, list<unode *> &path);
+bool get_path(unode *xstart, unode *ystart, vector<unode *> &path);
 void add_sockets(unode *x, unode *y, list<socket *> &sockets);
 void find_dead_components(uforest &T, socketcontainer &S, map<int, nodestatus> &T_status, vector<list<int> > &T_dead_components);
 void find_dead_components_hlpr(unode *n, unode *prev, int component, uforest &T, socketcontainer &S, map<int, nodestatus> &T_status, vector<list<int> > &T_dead_components);
@@ -423,14 +414,14 @@ int tbr_distance_hlpr(uforest &T1, uforest &T2, int k, T t,
 	uforest F2 = uforest(T2);
 
 	// remaining leaves and their mappings
-	list<int> leaves = F1.find_leaves();
+	vector<int> leaves = F1.find_leaves();
 	nodemapping twins = nodemapping(leaves);
 
 	// sibling pairs
 	map<int,int> sibling_pairs = F1.find_sibling_pairs();
 
 	// singletons
-	list<int> singletons = list<int>();
+	vector<int> singletons;
 
 	// "root" the trees
 	// TODO: make this normalize "leaves" as well
@@ -469,7 +460,7 @@ int tbr_distance_hlpr(uforest &T1, uforest &T2, int k, T t,
 
 template <typename T>
 int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
-                      map<int, int> &sibling_pairs, list<int> &singletons, T t,
+                      map<int, int> &sibling_pairs, vector<int> &singletons, T t,
                       int (*func_pointer)(uforest &F1, uforest &F2, nodemapping &twins,
                            int k, T s), uforest **MAF1 /* = NULL*/,
                            uforest **MAF2 /* = NULL*/) {
@@ -490,7 +481,7 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 			debug(Rcout << "Case 1" << endl);
 
 			unode *F2_a = F2.get_node(singletons.front());
-			singletons.pop_front();
+			singletons.erase(singletons.begin());
 			unode *F1_a = F1.get_node(twins.get_backward(F2_a->get_label()));
 			debug(
 				Rcout << "F1: " << F1.str() << endl;
@@ -501,7 +492,7 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 			)
 
 			// remove from sibling pairs if necessary
-			map<int,int>::iterator spi = sibling_pairs.find(F1_a->get_label());
+			auto spi = sibling_pairs.find(F1_a->get_label());
 //			map<int,int>::iterator j;
 			if (spi != sibling_pairs.end()) {
 //				j = sibling_pairs.find(i->second);
@@ -567,7 +558,7 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 		)
 
 		// get sibling pair (a,c) in F1
-		map<int, int>::iterator spi = sibling_pairs.begin();
+		auto spi = sibling_pairs.begin();
 		unode *F1_a = F1.get_node(spi->first);
 		unode *F1_c = F1.get_node(spi->second);
 		sibling_pairs.erase(F1_a->get_label());
@@ -727,11 +718,11 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 
 			debug(Rcout << F2.str_with_depths() << endl);
 
-			list<pair<int,int> > pendants = find_pendants(F2_a, F2_c);
+			vector<pair<int,int>> pendants = find_pendants(F2_a, F2_c);
 			int num_pendants = pendants.size();
 			debug(
 				Rcout << "path:" << endl;
-				list<unode *> path = list<unode *>();
+				vector<unode *> path;
 				get_path(F2_a, F2_c, path);
 
 				for (unode *x : path) {
@@ -779,8 +770,8 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 				uforest *MAF1_copy = NULL;
 				uforest *MAF2_copy = NULL;
 				nodemapping twins_copy = nodemapping(twins);
-				map<int,int> sibling_pairs_copy = map<int, int>(sibling_pairs);
-				list<int> singletons_copy = list<int>(singletons);
+				map<int,int> sibling_pairs_copy = sibling_pairs;
+				vector<int> singletons_copy = singletons;
 
 				debug(Rcout << F2_copy << endl);
 				int first_label = e_a.first;
@@ -845,8 +836,8 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 				uforest *MAF1_copy = NULL;
 				uforest *MAF2_copy = NULL;
 				nodemapping twins_copy = nodemapping(twins);
-				map<int, int> sibling_pairs_copy = map<int, int>(sibling_pairs);
-				list<int> singletons_copy = list<int>(singletons);
+				map<int,int> sibling_pairs_copy = sibling_pairs;
+				vector<int> singletons_copy = singletons;
 
 				debug(Rcout << F2_copy << endl);
 				int first_label = e_c.first;
@@ -904,10 +895,10 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 					uforest *MAF1_copy = NULL;
 					uforest *MAF2_copy = NULL;
 					nodemapping twins_copy = nodemapping(twins);
-					map<int, int> sibling_pairs_copy = map<int, int>(sibling_pairs);
+					map<int,int> sibling_pairs_copy = sibling_pairs;
 					sibling_pairs_copy.insert(make_pair(F1_a->get_label(), F1_c->get_label()));
 					sibling_pairs_copy.insert(make_pair(F1_c->get_label(), F1_a->get_label()));
-					list<int> singletons_copy = list<int>(singletons);
+					vector<int> singletons_copy = singletons;
 
 					debug(Rcout << F2_copy << endl);
 
@@ -995,10 +986,10 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 				uforest *MAF1_copy = NULL;
 				uforest *MAF2_copy = NULL;
 				nodemapping twins_copy = nodemapping(twins);
-				map<int, int> sibling_pairs_copy = map<int, int>(sibling_pairs);
+				map<int,int> sibling_pairs_copy = sibling_pairs;
 				sibling_pairs_copy.insert(make_pair(F1_a->get_label(), F1_c->get_label()));
 				sibling_pairs_copy.insert(make_pair(F1_c->get_label(), F1_a->get_label()));
-				list<int> singletons_copy = list<int>(singletons);
+				vector<int> singletons_copy = singletons;
 
 				debug(Rcout << F2_copy << endl);
 				int first_label = e_b.first;
@@ -1051,10 +1042,10 @@ int tbr_distance_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins,
 				uforest *MAF1_copy = NULL;
 				uforest *MAF2_copy = NULL;
 				nodemapping twins_copy = nodemapping(twins);
-				map<int, int> sibling_pairs_copy = map<int, int>(sibling_pairs);
+				map<int,int> sibling_pairs_copy = sibling_pairs;
 				sibling_pairs_copy.insert(make_pair(F1_a->get_label(), F1_c->get_label()));
 				sibling_pairs_copy.insert(make_pair(F1_c->get_label(), F1_a->get_label()));
-				list<int> singletons_copy = list<int>(singletons);
+				vector<int> singletons_copy = singletons;
 
 				debug(Rcout << F2_copy << endl);
 				int first_label = e_d.first;
@@ -1174,13 +1165,13 @@ int tbr_low_upper_bound(uforest &T1, uforest &T2) {
 	return tbr_approx(T1, T2, 1);
 }
 
-int tbr_branch_bound(uforest &F1, uforest &F2, nodemapping &twins, map<int, int> &sibling_pairs, list<int> &singletons) {
+int tbr_branch_bound(uforest &F1, uforest &F2, nodemapping &twins, map<int, int> &sibling_pairs, vector<int> &singletons) {
 
 	uforest F1_copy = uforest(F1);
 	uforest F2_copy = uforest(F2);
 	nodemapping twins_copy = nodemapping(twins);
-	map<int,int> sibling_pairs_copy = map<int, int>(sibling_pairs);
-	list<int> singletons_copy = list<int>(singletons);
+	map<int,int> sibling_pairs_copy = sibling_pairs;
+	vector<int> singletons_copy = singletons;
 
 	int result = tbr_approx_hlpr(F1_copy, F2_copy, 0, twins_copy, sibling_pairs_copy, singletons_copy);
 	return (result + 2) / 3;
@@ -1191,14 +1182,14 @@ int tbr_approx(uforest &T1, uforest &T2, bool low) {
 	uforest F2 = uforest(T2);
 
 	// remaining leaves and their mappings
-	list<int> leaves = F1.find_leaves();
+	vector<int> leaves = F1.find_leaves();
 	nodemapping twins = nodemapping(leaves);
 
 	// sibling pairs
 	map<int,int> sibling_pairs = F1.find_sibling_pairs();
 
 	// singletons
-	list<int> singletons = list<int>();
+	vector<int> singletons;
 
 	// "root" the trees
 	// TODO: make this normalize "leaves" as well
@@ -1240,7 +1231,7 @@ int tbr_approx(uforest &T1, uforest &T2, bool low) {
 	return result;
 }
 
-int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int, int> &sibling_pairs, list<int> &singletons) {
+int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int, int> &sibling_pairs, vector<int> &singletons) {
 
 	debug_approx(Rcout << "tbr_approx_hlpr(" << k << ")" << endl);
   Rcpp::checkUserInterrupt();
@@ -1253,7 +1244,7 @@ int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int
 			debug_approx(Rcout << "Case 1" << endl);
 
 			unode *F2_a = F2.get_node(singletons.front());
-			singletons.pop_front();
+			singletons.erase(singletons.begin());
 			unode *F1_a = F1.get_node(twins.get_backward(F2_a->get_label()));
 			debug_approx(
 				Rcout << "F1: " << F1.str() << endl;
@@ -1264,7 +1255,7 @@ int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int
 			)
 
 			// remove from sibling pairs if necessary
-			map<int,int>::iterator spi = sibling_pairs.find(F1_a->get_label());
+			auto spi = sibling_pairs.find(F1_a->get_label());
 //			map<int,int>::iterator j;
 			if (spi != sibling_pairs.end()) {
 //				j = sibling_pairs.find(i->second);
@@ -1332,7 +1323,7 @@ int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int
 		)
 
 		// get sibling pair (a,c) in F1
-		map<int, int>::iterator spi = sibling_pairs.begin();
+		auto spi = sibling_pairs.begin();
 		unode *F1_a = F1.get_node(spi->first);
 		unode *F1_c = F1.get_node(spi->second);
 		sibling_pairs.erase(F1_a->get_label());
@@ -1655,16 +1646,16 @@ int tbr_approx_hlpr(uforest &F1, uforest &F2, int k, nodemapping &twins, map<int
 	return k;
 }
 
-list<pair<int,int> > find_pendants(unode *a, unode *c) {
+vector<pair<int,int>> find_pendants(unode *a, unode *c) {
 	debug(Rcout << "find_pendants()" << endl);
 
-	list<pair<int,int> > pendants = list<pair<int,int> >();
-	list<unode *> path = list<unode *>();
+	vector<pair<int,int>> pendants;
+	vector<unode *> path;
 	// get the path from a to c, return an empty list if no path exists
 	if (!get_path(a, c, path)) {
 		return pendants;
 	}
-	list<unode *>::iterator x;
+	vector<unode *>::iterator x;
 	unode *prev = a;
 	for(x = path.begin(); x != path.end(); x++) {
 		int x_label = (*x)->get_label();
@@ -2544,9 +2535,9 @@ void find_sockets_hlpr(unode *n, unode *prev, uforest &T, list<socket *> &socket
 
 // append a path from xstart to ystart to path if one exists
 // return true iff a path exists
-bool get_path(unode *xstart, unode *ystart, list<unode *> &path) {
-	list<unode *> x_path = list<unode *>();
-	list<unode *> y_path = list<unode *>();
+bool get_path(unode *xstart, unode *ystart, vector<unode *> &path) {
+	vector<unode *> x_path;
+	vector<unode *> y_path;
 	unode *x = xstart;
 	unode *y = ystart;
 	bool same_component = true;
@@ -2569,14 +2560,14 @@ bool get_path(unode *xstart, unode *ystart, list<unode *> &path) {
 				break;
 			}
 			if (next != x) {
-				y_path.push_front(next);
+				y_path.push_back(next);
 			}
 			y = next;
 		}
 	}
 	if (same_component) {
-		path.splice(path.end(), x_path);
-		path.splice(path.end(), y_path);
+		path.insert(path.end(), x_path.begin(), x_path.end());
+		path.insert(path.end(), y_path.rbegin(), y_path.rend());
 		return true;
 	}
 	return false;
@@ -2831,7 +2822,7 @@ void add_phi_nodes(uforest &F, map<pair<int, int>, int> &F_add_phi_nodes) {
 }
 
 void leaf_reduction(utree *T1, utree *T2, map<string, int> *label_map = NULL, map<int, string> *reverse_label_map = NULL) {
-	list<int> leaves = T1->find_leaves();
+	vector<int> leaves = T1->find_leaves();
 	nodemapping twins = nodemapping(leaves);
 	map<int,int> sibling_pairs = T1->find_sibling_pairs();
 	T1->root(T1->get_smallest_leaf());

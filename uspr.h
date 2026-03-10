@@ -253,7 +253,7 @@ int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 				uforest T_copy(T);
 				uforest T2_copy(T2);
 
-				list<int> red_leaves = T_copy.find_leaves();
+				vector<int> red_leaves = T_copy.find_leaves();
 				nodemapping twins(red_leaves);
 				map<int, int> sibling_pairs = T_copy.find_sibling_pairs();
 				T_copy.root(T_copy.get_smallest_leaf());

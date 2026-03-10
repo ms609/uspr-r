@@ -41,6 +41,7 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #include <sstream>
 #include <cstdio>
 #include <climits>
+#include <cassert>
 
 using namespace std;
 
@@ -107,11 +108,53 @@ public:
 };
 
 
+// Fixed-capacity inline list for contracted neighbor pointers.
+// A degree-3 node can have at most 2 contracted neighbors (1 active remaining),
+// but capacity 3 guards against any edge case. Zero heap allocation.
+class contracted_list {
+	unode* data_[3];
+	int size_ = 0;
+public:
+	using iterator = unode**;
+	using const_iterator = unode* const*;
+
+	contracted_list() = default;
+	contracted_list(const contracted_list&) = default;
+	contracted_list& operator=(const contracted_list&) = default;
+
+	iterator begin() { return data_; }
+	iterator end()   { return data_ + size_; }
+	const_iterator begin() const { return data_; }
+	const_iterator end()   const { return data_ + size_; }
+
+	unode* front() const { return data_[0]; }
+	unode* operator[](int i) const { return data_[i]; }
+
+	bool empty() const { return size_ == 0; }
+	int size()   const { return size_; }
+
+	void push_back(unode* n) { data_[size_++] = n; }
+
+	void remove(unode* n) {
+		for (int i = 0; i < size_; ++i) {
+			if (data_[i] == n) {
+				for (int j = i; j < size_ - 1; ++j)
+					data_[j] = data_[j + 1];
+				--size_;
+				return;
+			}
+		}
+	}
+
+	void clear() { size_ = 0; }
+};
+
+
 class unode {
 	private:
 	int label;
 	neighbor_list neighbors;
-	vector<unode *> contracted_neighbors;
+	contracted_list contracted_neighbors;
 	int component;
 	bool terminal;
 	int distance;
@@ -179,13 +222,9 @@ class unode {
 	}
 
 	bool remove_contracted_neighbor(unode *n) {
-		auto it = std::find(contracted_neighbors.begin(),
-		                    contracted_neighbors.end(), n);
-		if (it != contracted_neighbors.end()) {
-			contracted_neighbors.erase(it);
-			return true;
-		}
-		return false;
+		int before = contracted_neighbors.size();
+		contracted_neighbors.remove(n);
+		return contracted_neighbors.size() < before;
 	}
 
 	bool contract_neighbor(unode *n) {
@@ -229,7 +268,7 @@ class unode {
 		return neighbors;
 	}
 
-	const vector<unode *> &const_contracted_neighbors() const {
+	const contracted_list &const_contracted_neighbors() const {
 		return contracted_neighbors;
 	}
 
@@ -237,7 +276,7 @@ class unode {
 		return neighbors;
 	}
 
-	vector<unode *> &get_contracted_neighbors() {
+	contracted_list &get_contracted_neighbors() {
 		return contracted_neighbors;
 	}
 

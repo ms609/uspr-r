@@ -30,7 +30,10 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <vector>
 #include <iostream>
+#include <map>
+#include <unordered_map>
 #include "unode.h"
+#include "unode_arena.h"
 
 using namespace std;
 
@@ -53,6 +56,7 @@ class utree {
 		vector <unode*> internal_nodes;
 		vector <unode*> leaves;
 		int smallest_leaf;
+		unode_arena arena_;
 	public:
 		// default constructor: empty tree (for building programmatically)
 		utree() : smallest_leaf(0) {}
@@ -72,12 +76,12 @@ class utree {
 			// create new nodes
 			for(int i = 0; i < internal_nodes_size; i++) {
 				if (T.internal_nodes[i] != NULL) {
-					internal_nodes[i] = new unode(*(T.internal_nodes[i]), false);
+					internal_nodes[i] = arena_.create(*(T.internal_nodes[i]), false);
 				}
 			}
 			for(int i = 0; i < leaves_size; i++) {
 				if (T.leaves[i] != NULL) {
-					leaves[i] = new unode(*(T.leaves[i]), false);
+					leaves[i] = arena_.create(*(T.leaves[i]), false);
 				}
 			}
 			// update neighbor pointers
@@ -106,25 +110,14 @@ class utree {
 				}
 			}
 		}
-		~utree() {
-			int end = internal_nodes.size();
-			for(int i = 0; i < end; i++) {
-				if (internal_nodes[i] != NULL) {
-					delete internal_nodes[i];
-				}
-			}
-			end = leaves.size();
-			for(int i = 0; i < end; i++) {
-				if (leaves[i] != NULL) {
-					delete leaves[i];
-				}
-			}
-		}
+		// Arena destructor frees all nodes in bulk (unode is trivially destructible).
+		~utree() = default;
 		// move constructor: transfers ownership with no deep copy
 		utree(utree&& T) noexcept
 			: internal_nodes(std::move(T.internal_nodes)),
 			  leaves(std::move(T.leaves)),
-			  smallest_leaf(T.smallest_leaf) {}
+			  smallest_leaf(T.smallest_leaf),
+			  arena_(std::move(T.arena_)) {}
 		utree& operator=(utree T) {
 			swap(*this, T);
 			return *this;
@@ -133,12 +126,13 @@ class utree {
 			swap(first.internal_nodes, second.internal_nodes);
 			swap(first.leaves, second.leaves);
 			swap(first.smallest_leaf, second.smallest_leaf);
+			swap(first.arena_, second.arena_);
 		}
 	friend ostream& operator<<(ostream &os, const utree& t);
 
 	 int add_internal_node() {
 		int label = -(internal_nodes.size() + 2);
-		internal_nodes.push_back( new unode(label));
+		internal_nodes.push_back(arena_.create(label));
 		return label;
 	}
 
@@ -150,7 +144,7 @@ class utree {
 		for(unsigned int i = start; i < label; i++) {
 			leaves[i] = NULL;
 		}
-		leaves[label] = new unode(label);
+		leaves[label] = arena_.create(label);
 		return label;
 	}
 
@@ -225,8 +219,9 @@ class utree {
 		return s.str();
 	}
 
-	list<int> find_leaves() {
-		list<int> leaf_list = list<int>();
+	vector<int> find_leaves() {
+		vector<int> leaf_list;
+		leaf_list.reserve(leaves.size());
 		for (unode *i : leaves) {
 			if (i != NULL) {
 				leaf_list.push_back(i->get_label());
@@ -236,7 +231,7 @@ class utree {
 	}
 
 	map<int, int> find_sibling_pairs() {
-		map<int, int> sibling_pairs = map<int, int>();
+		map<int, int> sibling_pairs;
 		find_sibling_pairs_hlpr(*this, sibling_pairs);
 		return sibling_pairs;
 	}
