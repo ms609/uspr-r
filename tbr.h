@@ -1920,10 +1920,10 @@ int replug_hlpr(uforest &F1, uforest &F2, nodemapping &twins, int k, pair<ufores
 	//
 	// identify sets of T1 and T2 sockets that map to the same AF edge
 	vector<pair<vector<socket *> , vector<socket *> > > socketcandidates = vector<pair<vector<socket *> , vector<socket *> > >();
-	i = 0;
+	debug_replug(i = 0;)
 	int max_sockets = 0;
 	for (pair<pair<int, int>, vector <socket*> > socketgroup : T1_sockets.sockets) {
-		i++;
+		debug_replug(i++;)
 		int start = socketgroup.first.first;
 		int end = socketgroup.first.second;
 		vector <socket *> &T1_group = socketgroup.second;
