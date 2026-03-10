@@ -68,7 +68,7 @@ list<utree> get_neighbors(utree *T, set<string> *known_trees) {
 // enumerate the source edges
 void get_neighbors(utree *T, unode *prev, unode *current, list<utree> &neighbors, set<string> *known_trees) {
 	// continue enumerating choices of the first edge
-	list<unode *> c_neighbors = current->get_neighbors();
+	auto c_neighbors = current->get_neighbors();
 	for (unode *next : c_neighbors) {
 		if (next != prev) {
 			get_neighbors(T, current, next, neighbors, known_trees);
@@ -85,7 +85,7 @@ void get_neighbors(utree *T, unode *prev, unode *current, list<utree> &neighbors
 void get_neighbors(utree *T, unode *x, unode *y, unode *prev, unode *current, list<utree> &neighbors, set<string> *known_trees) {
 	// continue enumerating choices of the second edge
 	// copy the neighbor list as it may change
-	list<unode *> c_neighbors = current->get_neighbors();
+	auto c_neighbors = current->get_neighbors();
 	for (unode *next : c_neighbors) {
 		if (next != prev) {
 			get_neighbors(T, x, y, current, next, neighbors, known_trees);

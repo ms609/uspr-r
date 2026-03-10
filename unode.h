@@ -35,9 +35,9 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 	#define debug(x)
 #endif
 
-#include <list>
 #include <vector>
 #include <algorithm>
+#include <iterator>
 #include <sstream>
 #include <cstdio>
 #include <climits>
@@ -46,12 +46,72 @@ using namespace std;
 
 class unode;
 
+// Fixed-capacity inline list for neighbor pointers.
+// Unrooted binary tree nodes have degree <= 3, so a 3-element array
+// replaces std::list<unode*> with zero heap allocation.
+class neighbor_list {
+	// Unrooted binary tree nodes have degree <= 3. Capacity 4 accommodates
+	// the transient dummy parent added during Newick parsing of the
+	// trifurcating root (3 children + 1 dummy, removed immediately).
+	unode* data_[4];
+	int size_ = 0;
+public:
+	using iterator = unode**;
+	using const_iterator = unode* const*;
+	using reverse_iterator = std::reverse_iterator<iterator>;
+	using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+	neighbor_list() = default;
+	neighbor_list(const neighbor_list&) = default;
+	neighbor_list& operator=(const neighbor_list&) = default;
+
+	iterator begin() { return data_; }
+	iterator end()   { return data_ + size_; }
+	const_iterator begin() const { return data_; }
+	const_iterator end()   const { return data_ + size_; }
+
+	reverse_iterator rbegin() { return reverse_iterator(end()); }
+	reverse_iterator rend()   { return reverse_iterator(begin()); }
+	const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+	const_reverse_iterator rend()   const { return const_reverse_iterator(begin()); }
+
+	unode* front() const { return data_[0]; }
+	unode* back()  const { return data_[size_ - 1]; }
+
+	bool empty() const { return size_ == 0; }
+	int size()   const { return size_; }
+
+	void push_front(unode* n) {
+		for (int i = size_; i > 0; --i) data_[i] = data_[i - 1];
+		data_[0] = n;
+		++size_;
+	}
+
+	void push_back(unode* n) {
+		data_[size_++] = n;
+	}
+
+	// Remove first occurrence by value, preserving order.
+	void remove(unode* n) {
+		for (int i = 0; i < size_; ++i) {
+			if (data_[i] == n) {
+				for (int j = i; j < size_ - 1; ++j)
+					data_[j] = data_[j + 1];
+				--size_;
+				return;
+			}
+		}
+	}
+
+	void clear() { size_ = 0; }
+};
+
+
 class unode {
 	private:
 	int label;
-	list<unode *> neighbors;
-	list<unode *> contracted_neighbors;
-	int num_neighbors;
+	neighbor_list neighbors;
+	vector<unode *> contracted_neighbors;
 	int component;
 	bool terminal;
 	int distance;
@@ -61,9 +121,6 @@ class unode {
 	public:
 	unode() {
 		label = -1;
-		neighbors = list<unode *>();
-		contracted_neighbors = list<unode *>();
-		num_neighbors = 0;
 		component = -1;
 		terminal = false;
 		distance = -1;
@@ -72,9 +129,6 @@ class unode {
 	}
 	unode(int l) {
 		label = l;
-		neighbors = list<unode *>();
-		contracted_neighbors = list<unode *>();
-		num_neighbors = 0;
 		component = -1;
 		terminal = false;
 		distance = -1;
@@ -85,14 +139,8 @@ class unode {
 		label = n.label;
 		// don't include neighbors when copying as they will be updated later
 		if (include_neighbors) {
-			neighbors = list<unode *>(n.neighbors);
-			contracted_neighbors = list<unode *>(n.contracted_neighbors);
-			num_neighbors = n.num_neighbors;
-		}
-		else {
-			neighbors = list<unode *>();
-			contracted_neighbors = list<unode *>();
-			num_neighbors = 0;
+			neighbors = n.neighbors;
+			contracted_neighbors = n.contracted_neighbors;
 		}
 		component = n.component;
 		terminal = n.terminal;
@@ -101,18 +149,15 @@ class unode {
 		phi = n.phi;
 	}
 	~unode() {
-		neighbors.clear();
-		contracted_neighbors.clear();
 	}
 
 	void add_neighbor(unode *n) {
-		if (num_neighbors > 0 && neighbors.front()->get_distance() > n->get_distance()) {
+		if (neighbors.size() > 0 && neighbors.front()->get_distance() > n->get_distance()) {
 			neighbors.push_front(n);
 		}
 		else {
 			neighbors.push_back(n);
 		}
-		num_neighbors++;
 	}
 
 	void add_contracted_neighbor(unode *n) {
@@ -121,38 +166,26 @@ class unode {
 
 	void add_parent(unode *n) {
 		neighbors.push_front(n);
-		num_neighbors++;
 	}
 
 	bool remove_neighbor(unode *n) {
-		list<unode *>::iterator i;
-		bool result = false;
-		for(i = neighbors.begin(); i != neighbors.end(); i++) {
-			if ((*i) == n) {
-				result = true;
-				break;
+		for (auto it = neighbors.begin(); it != neighbors.end(); ++it) {
+			if (*it == n) {
+				neighbors.remove(n);
+				return true;
 			}
 		}
-		if (result) {
-			neighbors.remove(*i);
-			num_neighbors--;
-		}
-		return result;
+		return false;
 	}
 
 	bool remove_contracted_neighbor(unode *n) {
-		list<unode *>::iterator i;
-		bool result = false;
-		for(i = contracted_neighbors.begin(); i != contracted_neighbors.end(); i++) {
-			if ((*i) == n) {
-				result = true;
-				break;
-			}
+		auto it = std::find(contracted_neighbors.begin(),
+		                    contracted_neighbors.end(), n);
+		if (it != contracted_neighbors.end()) {
+			contracted_neighbors.erase(it);
+			return true;
 		}
-		if (result) {
-			contracted_neighbors.remove(*i);
-		}
-		return result;
+		return false;
 	}
 
 	bool contract_neighbor(unode *n) {
@@ -192,32 +225,32 @@ class unode {
 		return label;
 	}
 
-	const list<unode *> &const_neighbors() const {
+	const neighbor_list &const_neighbors() const {
 		return neighbors;
 	}
 
-	const list<unode *> &const_contracted_neighbors() const {
+	const vector<unode *> &const_contracted_neighbors() const {
 		return contracted_neighbors;
 	}
 
-	list<unode *> &get_neighbors() {
+	neighbor_list &get_neighbors() {
 		return neighbors;
 	}
 
-	list<unode *> &get_contracted_neighbors() {
+	vector<unode *> &get_contracted_neighbors() {
 		return contracted_neighbors;
 	}
 
 	int get_num_neighbors() {
-		return num_neighbors;
+		return neighbors.size();
 	}
 
 	int get_num_all_neighbors() {
-		return num_neighbors + contracted_neighbors.size();
+		return neighbors.size() + static_cast<int>(contracted_neighbors.size());
 	}
 
 	bool is_leaf() {
-		return (num_neighbors == 1);
+		return (neighbors.size() == 1);
 	}
 
 	void set_component(int c) {
@@ -238,7 +271,7 @@ class unode {
 
 	void root(int l) {
 		unode *p = NULL;
-		for (unode *n : get_neighbors()) {
+		for (unode *n : neighbors) {
 			if (n->get_label() == l) {
 				p = n;
 			}
@@ -254,7 +287,7 @@ class unode {
 
 	void rotate(int l) {
 		unode *p = NULL;
-		for (unode *n : get_neighbors()) {
+		for (unode *n : neighbors) {
 			if (n->get_label() == l) {
 				p = n;
 			}
@@ -295,8 +328,7 @@ class unode {
 	}
 
 	unode *get_neighbor_not(unode *a, unode *b) {
-		list<unode *>::reverse_iterator x;
-		for (x = neighbors.rbegin(); x != neighbors.rend(); x++) {
+		for (auto x = neighbors.rbegin(); x != neighbors.rend(); ++x) {
 			if (*x != a && *x != b) {
 				return *x;
 			}
@@ -326,7 +358,6 @@ class unode {
 
 	void clear_neighbors() {
 		neighbors.clear();
-		num_neighbors = 0;
 	}
 
 
@@ -359,7 +390,7 @@ class unode {
 		debug(
 			Rcout << label << ".contract_degree_two_subtree()" << endl;
 		)
-		list<unode *> neighbor_copy = list<unode *>(get_neighbors());
+		neighbor_list neighbor_copy(neighbors);
 		for (unode *n : neighbor_copy) {
 			if (last == NULL || n != last) {
 				n->contract_degree_two_subtree(this);
@@ -370,10 +401,10 @@ class unode {
 
 	unode *contract() {
 		debug(
-			Rcout << "n: " << num_neighbors << endl;
+			Rcout << "n: " << neighbors.size() << endl;
 			Rcout << "c_n: " << contracted_neighbors.size() << endl;
 		)
-		if (num_neighbors == 1 && contracted_neighbors.empty()) {
+		if (neighbors.size() == 1 && contracted_neighbors.empty()) {
 			unode *p = neighbors.front();
 			if (p->is_leaf() && this->get_label() < -1) {
 				p->remove_neighbor(this);
@@ -388,10 +419,10 @@ class unode {
 			}
 		}
 //		/*
-		else if (num_neighbors == 0 && contracted_neighbors.size() == 2) {
+		else if (neighbors.size() == 0 && contracted_neighbors.size() == 2) {
 //			uncontract_neighbors();
 			unode *p = contracted_neighbors.front();
-			unode *c = *(next(contracted_neighbors.begin(), 1));
+			unode *c = contracted_neighbors[1];
 			debug(
 				Rcout << "contracting:" << endl;
 				Rcout << p << "\t" << p->get_num_all_neighbors() << endl;
@@ -434,9 +465,9 @@ class unode {
 			}
 		}
 //		*/
-		else if (num_neighbors == 2 && contracted_neighbors.empty()) {
+		else if (neighbors.size() == 2 && contracted_neighbors.empty()) {
 			unode *p = neighbors.front();
-			unode *c = *(next(neighbors.begin(), 1));
+			unode *c = *(neighbors.begin() + 1);
 			debug(
 				Rcout << "contracting:" << endl;
 				Rcout << p << endl;
@@ -481,7 +512,7 @@ class unode {
 		return distance;
 	}
 	bool is_singleton() {
-		if (num_neighbors == 0) {
+		if (neighbors.size() == 0) {
 			return true;
 		}
 		return false;
@@ -517,9 +548,8 @@ class unode {
 		unode *parent = NULL;
 		int min_descendant = INT_MAX;
 
-		// Active neighbors: internal nodes in an unrooted binary tree have
-		// degree 3, so at most 3 children (2 when prev != NULL, 3 at root).
-		// Inline array + insertion sort avoids the per-call map heap allocation.
+		// Active neighbors: at most 3 children.
+		// Inline array + insertion sort (already inline — no extra allocation).
 		unode* ch[3];
 		int ch_min[3];
 		int nch = 0;
@@ -527,7 +557,6 @@ class unode {
 		for (unode *n : neighbors) {
 			if (n != prev) {
 				int m = n->normalize_order_hlpr(this);
-				// Insertion sort — at most 3 elements, so O(1) in practice
 				int i = nch++;
 				while (i > 0 && ch_min[i - 1] > m) {
 					ch[i]     = ch[i - 1];
@@ -548,9 +577,7 @@ class unode {
 		if (parent != NULL) add_neighbor(parent);
 		for (int i = 0; i < nch; ++i) add_neighbor(ch[i]);
 
-		// Contracted neighbors: present only during leaf-reduction paths
-		// (not in the decoded trees of the main A* loop).
-		// Use vector<pair> — one allocation instead of N map-node allocations.
+		// Contracted neighbors
 		if (!contracted_neighbors.empty()) {
 			vector<pair<int, unode*>> ordered;
 			ordered.reserve(contracted_neighbors.size());

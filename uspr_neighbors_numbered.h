@@ -53,7 +53,7 @@ list<tree_num_t> get_neighbors_numbered(utree *T,
 void get_neighbors_numbered(utree *T, unode *prev, unode *current,
     list<tree_num_t> &neighbors,
     unordered_set<tree_num_t, tree_num_hash> *known_trees) {
-	list<unode *> c_neighbors = current->get_neighbors();
+	auto c_neighbors = current->get_neighbors();
 	for (unode *next : c_neighbors) {
 		if (next != prev) {
 			get_neighbors_numbered(T, current, next, neighbors, known_trees);
@@ -70,7 +70,7 @@ void get_neighbors_numbered(utree *T, unode *x, unode *y,
     unode *prev, unode *current,
     list<tree_num_t> &neighbors,
     unordered_set<tree_num_t, tree_num_hash> *known_trees) {
-	list<unode *> c_neighbors = current->get_neighbors();
+	auto c_neighbors = current->get_neighbors();
 	for (unode *next : c_neighbors) {
 		if (next != prev) {
 			get_neighbors_numbered(T, x, y, current, next, neighbors, known_trees);

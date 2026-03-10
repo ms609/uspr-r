@@ -83,11 +83,11 @@ class utree {
 			// update neighbor pointers
 			for(int i = 0; i < internal_nodes_size; i++) {
 				if (internal_nodes[i] != NULL) {
-					list<unode *> &old_neighbors = T.internal_nodes[i]->get_neighbors();
+					auto &old_neighbors = T.internal_nodes[i]->get_neighbors();
 					for (unode *u : old_neighbors) {
 						internal_nodes[i]->add_neighbor(get_node(u->get_label()));
 					}
-					list<unode *> &old_contracted_neighbors = T.internal_nodes[i]->get_contracted_neighbors();
+					auto &old_contracted_neighbors = T.internal_nodes[i]->get_contracted_neighbors();
 					for (unode *u : old_contracted_neighbors) {
 						internal_nodes[i]->add_contracted_neighbor(get_node(u->get_label()));
 					}
@@ -95,11 +95,11 @@ class utree {
 			}
 			for(int i = 0; i < leaves_size; i++) {
 				if (leaves[i] != NULL) {
-					list<unode *> &old_neighbors = T.leaves[i]->get_neighbors();
+					auto &old_neighbors = T.leaves[i]->get_neighbors();
 					for (unode *u : old_neighbors) {
 						leaves[i]->add_neighbor(get_node(u->get_label()));
 					}
-					list<unode *> &old_contracted_neighbors = T.leaves[i]->get_contracted_neighbors();
+					auto &old_contracted_neighbors = T.leaves[i]->get_contracted_neighbors();
 					for (unode *u : old_contracted_neighbors) {
 						leaves[i]->add_contracted_neighbor(get_node(u->get_label()));
 					}
@@ -289,7 +289,6 @@ class utree {
 		if (print_internal_labels || n->get_label() >= 0) {
 			s << n->str(reverse_label_map);
 		}
-		list<unode *>::const_iterator i;
 		int count = 0;
 		bool has_contracted = false;
 		for(unode *i : n->const_neighbors()) {
@@ -330,8 +329,6 @@ class utree {
 		if (print_internal_labels || n->get_label() >= 0) {
 			s << n->str(reverse_label_map);
 		}
-		list<unode *>::const_iterator i;
-
 		int count = 0;
 		bool has_contracted = false;
 		for(unode *i : n->const_neighbors()) {
@@ -372,8 +369,6 @@ class utree {
 		if (print_internal_labels || n->get_label() >= 0) {
 			s << n->str();
 		}
-		list<unode *>::const_iterator i;
-
 		int count = 0;
 		bool has_contracted = false;
 		for(unode *i : n->const_neighbors()) {
