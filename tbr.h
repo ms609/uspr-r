@@ -42,8 +42,13 @@ along with uspr.  If not, see <https://www.gnu.org/licenses/>.
 #include "utree.h"
 #include "unode.h"
 #include "uforest.h"
+// Boost concept-check headers use ((Model*)0)->~Model() which triggers
+// -Wnonnull on GCC 12+.  This is a known Boost issue, not a TBRDist bug.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnonnull"
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/max_cardinality_matching.hpp>
+#pragma GCC diagnostic pop
 #include <iterator>
 
 class nodemapping;
