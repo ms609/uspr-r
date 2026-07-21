@@ -230,7 +230,12 @@ int uspr_distance_numbered(uforest &T1, uforest &T2, int n_tip) {
 		final_estimator = REPLUG;
 	}
 
+	unsigned long interrupt_counter = 0;
 	while (!distance_priority_queue.empty()) {
+		if ((++interrupt_counter & 1023UL) == 0UL) {
+			Rcpp::checkUserInterrupt();
+		}
+
 		const tree_distance_num top = distance_priority_queue.top();
 		distance_priority_queue.pop();
 
@@ -365,7 +370,12 @@ int uspr_distance_string_based(uforest &T1, uforest &T2) {
 		final_estimator = REPLUG;
 	}
 
+	unsigned long interrupt_counter = 0;
 	while (!distance_priority_queue.empty()) {
+		if ((++interrupt_counter & 1023UL) == 0UL) {
+			Rcpp::checkUserInterrupt();
+		}
+
 		multiset<tree_distance>::iterator it = distance_priority_queue.begin();
 
 		int cost = it->cost;
